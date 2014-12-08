@@ -1,0 +1,325 @@
+=head1 NAME
+
+auto_whitelist_soft - whitelist override for other qpsmtpd plugins
+
+=head1 DESCRIPTION
+
+The uber_whitelist_soft plugin allows whitelisting of incoming email
+across multiple vectors
+
+  recipient address
+  sender host
+  sender helo
+  sender envelope address
+  sender envelope domain
+
+plugin also auto-adds whitelisted sender for rcpts from all outbound email.
+
+storage and lookup is via SQLite database, by default placed in
+/var/lib/qpsmtpd/auto_whitelist_soft/whitelist.db.  on first run plugin
+will initialize the db and populate with existing whitelisted values from
+
+  whitelisthosts
+  whitelisthelo
+  whitelistsenders (split between senders and domains on import)
+  whitelistrcpt
+
+loosely based on Gavin Carr's 'whitelist_soft', which itself was based on
+Devin Carraway's 'whitelist' plugin.
+
+=head1 DEPENDENCIES
+
+  libsqlite3
+  DBI
+  DBD::SQLite
+  Qpsmtpd (obviously)
+
+=head1 AUTHOR
+
+mark warren bracher <bracher@gmail.com>.
+
+loosely based on 'whitelist_soft' by Gavin Carr <gavin@openfusion.com.au>.
+
+=cut
+
+use strict;
+use warnings;
+
+use DBI;
+use DBD::SQLite;
+use Qpsmtpd::Constants;
+
+my $VERSION = 0.01;
+
+my $ME = 'auto_whitelist_soft';
+our %DEFAULTS = (
+    dbdir  => "/var/lib/qpsmtpd/$ME",
+    dbfile => 'whitelist.db',
+);
+
+our $uws_config;
+sub _config {
+    my $self = shift;
+    $uws_config ||= +{
+        %DEFAULTS,
+        map { split /\s+/, $_, 2 } $self->qp->config($ME)
+    };
+}
+
+sub register {
+    my($self, $qp) = @_;
+    # don't really need it _now_, but forces init and import if necessary
+    my $dbh = $self->_dbh;
+    $self->register_hook('connect', 'check_host');
+    $self->register_hook('helo',    'check_helo');
+    $self->register_hook('ehlo',    'check_helo');
+    $self->register_hook('mail',    'check_sender');
+    $self->register_hook('rcpt',    'check_rcpt');
+}
+
+our $dbh;
+sub _dbh {
+    return $dbh if $dbh;
+    my $self = shift;
+    my $config = $self->_config;
+    my $file   = $config->{dbdir} . '/' . $config->{dbfile};
+    my $new    = !-e $file;
+    $dbh = DBI->connect(
+        "dbi:SQLite:dbname=$file",
+        undef, undef,
+        {   AutoCommit     => 1,
+            RaiseError     => 1,
+            sqlite_unicode => 1,
+        }
+    );
+    if ($new) {
+        $self->_initdb($dbh);
+    }
+    return $dbh;
+}
+
+sub _initdb {
+    my($self, $dbh) = @_;
+    $self->_initdb_hosts($dbh);
+    $self->_initdb_helos($dbh);
+    $self->_initdb_senders($dbh);
+    $self->_initdb_domains($dbh);
+    $self->_initdb_rcpts($dbh);
+}
+
+sub _check_sql_count {
+    my($self, $sql, $bind) = @_;
+    my $sth = $self->_dbh->prepare_cached($sql);
+    $sth->execute(@$bind);
+    my $count;
+    $sth->bind_columns(\$count);
+    $sth->fetch;
+    $sth->finish;
+    return $count;
+}
+
+
+sub _initdb_hosts {
+    my($self, $dbh) = @_;
+    my $create = <<'CREATE';
+CREATE TABLE whitelist_hosts (
+  host      text     not null primary key,
+  imported  integer  not null default 0,
+  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  comment   text
+);
+CREATE
+    $dbh->do($create);
+    my $insert = <<'INSERT';
+insert into whitelist_hosts (host, imported) values (?,?);
+INSERT
+    my $sth = $dbh->prepare($insert);
+    # bootstrap with data from whitelist(_soft) text configs
+    foreach my $value ($self->qp->config('whitelisthosts')) {
+        $value = lc $value;
+        $sth->execute($value, 1);
+    }
+    $sth->finish;
+}
+
+
+# TODO: handle partial ips (implied ranges)
+our $host_sql = <<'HOST_SQL';
+select count(1) from whitelist_hosts where host = ?;
+HOST_SQL
+sub check_host {
+    my($self, $trans, $rcpt) = @_;
+    my $ip = $self->qp->connection->remote_ip || return (DECLINED);
+    # From tcpserver
+    if (exists $ENV{WHITELISTCLIENT}) {
+        $self->qp->connection->notes('whitelistclient', 1);
+        return (OK);
+    }
+    if ($self->_check_sql_count($host_sql, [$ip])) {
+        $self->qp->connection->notes('whitelisthost', 1);
+        return (OK);
+    }
+    return (DECLINED);
+}
+
+
+sub _initdb_helos {
+    my($self, $dbh) = @_;
+    my $create = <<'CREATE';
+CREATE TABLE whitelist_helos (
+  helo      text     not null primary key,
+  imported  integer  not null default 0,
+  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  comment   text
+);
+CREATE
+    $dbh->do($create);
+    my $insert = <<'INSERT';
+insert into whitelist_helos (helo, imported) values (?,?);
+INSERT
+    my $sth = $dbh->prepare($insert);
+    # bootstrap with data from whitelist(_soft) text configs
+    foreach my $value ($self->qp->config('whitelisthelo')) {
+        $value = lc $value;
+        $sth->execute($value, 1);
+    }
+    $sth->finish;
+}
+
+our $helo_sql = <<'HOST_SQL';
+select count(1) from whitelist_helos where helo = ?;
+HOST_SQL
+sub check_helo {
+    my($self, $trans, $helo) = @_;
+    my $check = lc $helo;
+    if ($self->_check_sql_count($helo_sql, [$check])) {
+        $self->qp->connection->notes('whitelisthelo', 1);
+        return (OK);
+    }
+    return (DECLINED);
+}
+
+
+sub _initdb_senders {
+    my($self, $dbh) = @_;
+    my $create = <<'CREATE';
+CREATE TABLE whitelist_senders (
+  sender    text     not null primary key,
+  auto      integer  not null default 0,
+  imported  integer  not null default 0,
+  created   integer  not null default CURRENT_TIMESTAMP,
+  comment   text
+);
+CREATE
+    $dbh->do($create);
+    my $insert = <<'INSERT';
+insert into whitelist_senders (sender, imported) values (?,?);
+INSERT
+    my $sth = $dbh->prepare($insert);
+    # bootstrap with data from whitelist(_soft) text configs
+    foreach my $value ($self->qp->config('whitelistsenders')) {
+        # skip domain whitelists, we'll handle them separately
+        next unless $value =~ m/@/;
+        $value = lc $value;
+        $sth->execute($value, 1);
+    }
+    $sth->finish;
+}
+
+sub _initdb_domains {
+    my($self, $dbh) = @_;
+    my $create = <<'CREATE';
+CREATE TABLE whitelist_sender_domains (
+  domain    text     not null primary key,
+  imported  integer  not null default 0,
+  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  comment   text
+);
+CREATE
+    $dbh->do($create);
+    my $insert = <<'INSERT';
+insert into whitelist_sender_domains (domain, imported) values (?,?);
+INSERT
+    my $sth = $dbh->prepare($insert);
+    # bootstrap with data from whitelist(_soft) text configs
+    foreach my $value ($self->qp->config('whitelistsenders')) {
+        # skip address whitelists, only want domains here...
+        next if $value =~ m/@/;
+        $value = lc $value;
+        $sth->execute($value, 1);
+    }
+    $sth->finish;
+}
+
+our $sender_sql = <<'SENDER_SQL';
+select count(1) from whitelist_senders where sender = ?;
+SENDER_SQL
+our $domain_sql = <<'DOMAIN_SQL';
+select count(1) from whitelist_sender_domains where domain = ?;
+DOMAIN_SQL
+sub check_sender {
+    my($self, $trans, $sender) = @_;
+    my $host = lc($sender->host);
+    if ($self->_check_sql_count($domain_sql, [$host])) {
+        $trans->notes('whitelistsender', 1);
+        return (OK);
+    }
+    my $addr = lc($sender->user.'@'.$host);
+    if ($self->_check_sql_count($sender_sql, [$addr])) {
+        $trans->notes('whitelistsender', 1);
+        return (OK);
+    }
+    return (DECLINED);
+}
+
+
+sub _initdb_rcpts {
+    my($self, $dbh) = @_;
+    my $create = <<'CREATE';
+CREATE TABLE whitelist_rcpts (
+  rcpt      text     not null primary key,
+  imported  integer  not null default 0,
+  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  comment   text
+);
+CREATE
+    $dbh->do($create);
+    my $insert = <<'INSERT';
+insert into whitelist_rcpts (rcpt, imported) values (?,?);
+INSERT
+    my $sth = $dbh->prepare($insert);
+    # bootstrap with data from whitelist(_soft) text configs
+    foreach my $value ($self->qp->config('whitelistrcpt')) {
+        $value = lc $value;
+        $sth->execute($value, 1);
+    }
+    $sth->finish;
+}
+
+our $auto_sender_sql = <<'AUTO_SENDER';
+insert into whitelist_senders (sender, auto) values (?,?);
+AUTO_SENDER
+our $rcpt_sql = <<'RCPT_SQL';
+select count(1) from whitelist_rcpts where rcpt = ?;
+RCPT_SQL
+sub check_rcpt {
+    my($self, $trans, $rcpt) = @_;
+    my $addr = lc($rcpt->user.'@'.$rcpt->host);
+    # outbound relay, add recipient to sender whitelist
+    if ($self->qp->connection->relay_client) {
+        # check that addr does not yet exist
+        unless ($self->_check_sql_count($sender_sql, [$addr])) {
+            $self->_dbh->do($auto_sender_sql, {}, $addr, 1);
+        }
+        return (DECLINED);
+    }
+    return (OK) if $self->_check_sql_count($rcpt_sql, [$addr]);    
+    if ($self->_check_sql_count($rcpt_sql, [$addr])) {
+        my $note = $trans->notes('whitelistrcpt');
+        $trans->notes('whitelistrcpt', ++$note);
+        return (OK);
+    }
+    return (DECLINED);
+}
+
+1;
