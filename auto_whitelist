@@ -1,6 +1,6 @@
 =head1 NAME
 
-auto_whitelist_soft - whitelist override for other qpsmtpd plugins
+auto_whitelist - whitelist override for other qpsmtpd plugins
 
 =head1 DESCRIPTION
 
@@ -16,7 +16,7 @@ across multiple vectors
 plugin also auto-adds whitelisted sender for rcpts from all outbound email.
 
 storage and lookup is via SQLite database, by default placed in
-/var/lib/qpsmtpd/auto_whitelist_soft/whitelist.db.  on first run plugin
+/var/lib/qpsmtpd/auto_whitelist/whitelist.db.  on first run plugin
 will initialize the db and populate with existing whitelisted values from
 
   whitelisthosts
@@ -51,7 +51,7 @@ use Qpsmtpd::Constants;
 
 my $VERSION = 0.01;
 
-my $ME = 'auto_whitelist_soft';
+my $ME = 'auto_whitelist';
 our %DEFAULTS = (
     dbdir  => "/var/lib/qpsmtpd/$ME",
     dbfile => 'whitelist.db',
@@ -143,7 +143,6 @@ INSERT
 }
 
 
-# TODO: handle partial ips (implied ranges)
 our $host_sql = <<'HOST_SQL';
 select count(1) from whitelist_hosts where host = ?;
 HOST_SQL
@@ -158,6 +157,15 @@ sub check_host {
     if ($self->_check_sql_count($host_sql, [$ip])) {
         $self->qp->connection->notes('whitelisthost', 1);
         return (OK);
+    }
+    # test partial ips
+    my @pieces = split('.', $ip);
+    for my $i (3..1) {
+        my $test = join('.', @pieces[1..$i]) . '.';
+        if ($self->_check_sql_count($host_sql, [$test])) {
+            $self->qp->connection->notes('whitelisthost', 1);
+            return (OK);
+        }
     }
     return (DECLINED);
 }
