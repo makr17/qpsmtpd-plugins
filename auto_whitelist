@@ -123,15 +123,15 @@ sub _initdb_hosts {
     my($self, $dbh) = @_;
     my $create = <<'CREATE';
 CREATE TABLE whitelist_hosts (
-  host      text     not null primary key,
-  imported  integer  not null default 0,
-  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  host      text       not null primary key,
+  imported  integer    not null default 0,
+  created   timestamp  not null default CURRENT_TIMESTAMP,
   comment   text
-);
+)
 CREATE
     $dbh->do($create);
     my $insert = <<'INSERT';
-insert into whitelist_hosts (host, imported) values (?,?);
+insert into whitelist_hosts (host, imported) values (?,?)
 INSERT
     my $sth = $dbh->prepare($insert);
     # bootstrap with data from whitelist(_soft) text configs
@@ -144,7 +144,7 @@ INSERT
 
 
 our $host_sql = <<'HOST_SQL';
-select count(1) from whitelist_hosts where host = ?;
+select count(1) from whitelist_hosts where host = ?
 HOST_SQL
 sub check_host {
     my($self, $trans, $rcpt) = @_;
@@ -175,15 +175,15 @@ sub _initdb_helos {
     my($self, $dbh) = @_;
     my $create = <<'CREATE';
 CREATE TABLE whitelist_helos (
-  helo      text     not null primary key,
-  imported  integer  not null default 0,
-  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  helo      text       not null primary key,
+  imported  integer    not null default 0,
+  created   timestamp  not null default CURRENT_TIMESTAMP,
   comment   text
-);
+)
 CREATE
     $dbh->do($create);
     my $insert = <<'INSERT';
-insert into whitelist_helos (helo, imported) values (?,?);
+insert into whitelist_helos (helo, imported) values (?,?)
 INSERT
     my $sth = $dbh->prepare($insert);
     # bootstrap with data from whitelist(_soft) text configs
@@ -195,7 +195,7 @@ INSERT
 }
 
 our $helo_sql = <<'HOST_SQL';
-select count(1) from whitelist_helos where helo = ?;
+select count(1) from whitelist_helos where helo = ?
 HOST_SQL
 sub check_helo {
     my($self, $trans, $helo) = @_;
@@ -217,11 +217,11 @@ CREATE TABLE whitelist_senders (
   imported  integer  not null default 0,
   created   integer  not null default CURRENT_TIMESTAMP,
   comment   text
-);
+)
 CREATE
     $dbh->do($create);
     my $insert = <<'INSERT';
-insert into whitelist_senders (sender, imported) values (?,?);
+insert into whitelist_senders (sender, imported) values (?,?)
 INSERT
     my $sth = $dbh->prepare($insert);
     # bootstrap with data from whitelist(_soft) text configs
@@ -238,15 +238,15 @@ sub _initdb_domains {
     my($self, $dbh) = @_;
     my $create = <<'CREATE';
 CREATE TABLE whitelist_sender_domains (
-  domain    text     not null primary key,
-  imported  integer  not null default 0,
-  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  domain    text       not null primary key,
+  imported  integer    not null default 0,
+  created   timestamp  not null default CURRENT_TIMESTAMP,
   comment   text
-);
+)
 CREATE
     $dbh->do($create);
     my $insert = <<'INSERT';
-insert into whitelist_sender_domains (domain, imported) values (?,?);
+insert into whitelist_sender_domains (domain, imported) values (?,?)
 INSERT
     my $sth = $dbh->prepare($insert);
     # bootstrap with data from whitelist(_soft) text configs
@@ -260,10 +260,10 @@ INSERT
 }
 
 our $sender_sql = <<'SENDER_SQL';
-select count(1) from whitelist_senders where sender = ?;
+select count(1) from whitelist_senders where sender = ?
 SENDER_SQL
 our $domain_sql = <<'DOMAIN_SQL';
-select count(1) from whitelist_sender_domains where domain = ?;
+select count(1) from whitelist_sender_domains where domain = ?
 DOMAIN_SQL
 sub check_sender {
     my($self, $trans, $sender) = @_;
@@ -285,15 +285,15 @@ sub _initdb_rcpts {
     my($self, $dbh) = @_;
     my $create = <<'CREATE';
 CREATE TABLE whitelist_rcpts (
-  rcpt      text     not null primary key,
-  imported  integer  not null default 0,
-  created   integer  not null default datetime(CURRENT_TIMESTAMP),
+  rcpt      text       not null primary key,
+  imported  integer    not null default 0,
+  created   timestamp  not null default CURRENT_TIMESTAMP,
   comment   text
-);
+)
 CREATE
     $dbh->do($create);
     my $insert = <<'INSERT';
-insert into whitelist_rcpts (rcpt, imported) values (?,?);
+insert into whitelist_rcpts (rcpt, imported) values (?,?)
 INSERT
     my $sth = $dbh->prepare($insert);
     # bootstrap with data from whitelist(_soft) text configs
@@ -305,10 +305,10 @@ INSERT
 }
 
 our $auto_sender_sql = <<'AUTO_SENDER';
-insert into whitelist_senders (sender, auto) values (?,?);
+insert into whitelist_senders (sender, auto) values (?,?)
 AUTO_SENDER
 our $rcpt_sql = <<'RCPT_SQL';
-select count(1) from whitelist_rcpts where rcpt = ?;
+select count(1) from whitelist_rcpts where rcpt = ?
 RCPT_SQL
 sub check_rcpt {
     my($self, $trans, $rcpt) = @_;
