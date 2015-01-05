@@ -40,6 +40,14 @@ mark warren bracher <bracher@gmail.com>.
 
 loosely based on 'whitelist_soft' by Gavin Carr <gavin@openfusion.com.au>.
 
+=head1 TODO
+
+* don't auto whitelist addresses from domains in rcpthosts
+  they should be authenticated anyways, so no greylisting
+
+* parametrize whitelist tables by rcpt, and support per-recipient lists
+  for auto, rcpt should be the sender that originated the outbound email
+
 =cut
 
 use strict;
