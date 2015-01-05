@@ -42,6 +42,8 @@ loosely based on 'whitelist_soft' by Gavin Carr <gavin@openfusion.com.au>.
 
 =head1 TODO
 
+* fixup import/bootstrap on first run
+
 * don't auto whitelist addresses from domains in rcpthosts
   they should be authenticated anyways, so no greylisting
 
